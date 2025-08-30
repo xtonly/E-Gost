@@ -2,7 +2,7 @@
 
 # Gost 管理脚本
 # 支持 TCP+UDP 双协议端口转发
-# 版本: v1.0.1 - 优化版（添加快捷方式和时间显示）
+# 版本: v1.1 Pro版
 
 CONFIG_FILE="/etc/gost/config.yaml"
 SERVICE_FILE="/etc/systemd/system/gost.service"
@@ -19,11 +19,49 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
+PURPLE='\033[1;35m'
 NC='\033[0m'
 
 # 显示当前时间
 show_time() {
     echo -e "${YELLOW}当前时间: $(date '+%Y-%m-%d %H:%M:%S')${NC}"
+}
+
+# 获取Gost版本
+get_gost_version() {
+    if [[ -f "$BINARY_PATH" ]]; then
+        $BINARY_PATH -V 2>/dev/null | head -n 1 | awk '{print $2}' || echo "未安装"
+    else
+        echo "未安装"
+    fi
+}
+
+# 获取Gost状态
+get_gost_status() {
+    if systemctl is-active gost >/dev/null 2>&1; then
+        echo -e "${GREEN}运行中${NC}"
+    else
+        echo -e "${RED}已停止${NC}"
+    fi
+}
+
+# 获取转发规则统计
+get_rules_stats() {
+    local active_count=0
+    local expired_count=0
+    local current_time=$(date +%s)
+    
+    if [[ -f "$EXPIRES_PATH" ]]; then
+        while IFS=: read -r port expire_date; do
+            if [ "$expire_date" = "永久" ] || [ "$expire_date" -gt "$current_time" ]; then
+                ((active_count++))
+            else
+                ((expired_count++))
+            fi
+        done < "$EXPIRES_PATH"
+    fi
+    
+    echo "$active_count $expired_count"
 }
 
 # 检查 root 权限
@@ -90,11 +128,34 @@ install_gost() {
     # 创建流量监控脚本
     create_traffic_scripts
 
-    # 创建快捷方式
-    create_shortcut
+    # 添加Gost监控定时任务
+    add_gost_monitor_cron
 
     echo -e "${GREEN}Gost 安装完成!${NC}"
     echo -e "${YELLOW}请使用配置菜单设置转发规则${NC}"
+}
+
+# 添Gost监控定时任务
+add_gost_monitor_cron() {
+    cat > /usr/local/bin/gost-monitor.sh << 'EOF'
+#!/bin/bash
+
+# Gost 服务监控脚本
+# 每小时检查一次Gost是否运行，如果没有运行则重启
+
+if ! systemctl is-active gost >/dev/null 2>&1; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Gost 服务未运行，正在重启..." >> /var/log/gost-monitor.log
+    systemctl restart gost
+    if systemctl is-active gost >/dev/null 2>&1; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Gost 服务重启成功" >> /var/log/gost-monitor.log
+    else
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Gost 服务重启失败" >> /var/log/gost-monitor.log
+    fi
+fi
+EOF
+
+    chmod +x /usr/local/bin/gost-monitor.sh
+    echo "0 * * * * root /usr/local/bin/gost-monitor.sh >/dev/null 2>&1" > /etc/cron.d/gost-monitor
 }
 
 # 创建快捷方式
@@ -106,10 +167,105 @@ create_shortcut() {
     chmod +x /usr/local/bin/gost-manager.sh
     
     # 创建软链接
-    ln -sf /usr/local/bin/gost-manager.sh /usr/bin/g
+    ln -sf /usr/local/bin/gost-manager.sh /usr/bin/zf
     
-    echo -e "${GREEN}快捷命令 'g' 创建成功!${NC}"
-    echo -e "${YELLOW}现在可以使用 'g' 命令快速打开管理面板${NC}"
+    echo -e "${GREEN}快捷命令 'zf' 创建成功!${NC}"
+    echo -e "${YELLOW}现在可以使用 'zf' 命令快速打开管理面板${NC}"
+}
+
+# 删除快捷方式
+delete_shortcut() {
+    echo -e "${YELLOW}当前已存在的快捷方式:${NC}"
+    
+    local shortcuts=()
+    local shortcut_paths=()
+    
+    # 查找所有快捷方式
+    if [[ -L "/usr/bin/zf" ]]; then
+        shortcuts+=("zf")
+        shortcut_paths+=("/usr/bin/zf")
+    fi
+    
+    if [[ -L "/usr/bin/g" ]]; then
+        shortcuts+=("g")
+        shortcut_paths+=("/usr/bin/g")
+    fi
+    
+    if [[ ${#shortcuts[@]} -eq 0 ]]; then
+        echo -e "${RED}没有找到任何快捷方式${NC}"
+        sleep 2
+        return
+    fi
+    
+    # 显示快捷方式列表
+    for i in "${!shortcuts[@]}"; do
+        echo "$((i+1)). ${shortcuts[$i]} -> $(readlink -f ${shortcut_paths[$i]})"
+    done
+    echo "99. 删除所有快捷方式"
+    echo "00. 返回"
+    
+    read -p "请选择要删除的快捷方式编号 (多个用空格分隔): " choices
+    
+    if [[ "$choices" == "00" ]]; then
+        return
+    fi
+    
+    if [[ "$choices" == "99" ]]; then
+        for path in "${shortcut_paths[@]}"; do
+            rm -f "$path"
+            echo -e "${YELLOW}已删除快捷方式: $(basename $path)${NC}"
+        done
+        echo -e "${GREEN}所有快捷方式已删除${NC}"
+        sleep 2
+        return
+    fi
+    
+    # 处理多个选择
+    local deleted=0
+    for choice in $choices; do
+        if [[ $choice -ge 1 && $choice -le ${#shortcuts[@]} ]]; then
+            local index=$((choice-1))
+            rm -f "${shortcut_paths[$index]}"
+            echo -e "${YELLOW}已删除快捷方式: ${shortcuts[$index]}${NC}"
+            ((deleted++))
+        else
+            echo -e "${RED}无效的选择: $choice${NC}"
+        fi
+    done
+    
+    if [[ $deleted -gt 0 ]]; then
+        echo -e "${GREEN}已删除 $deleted 个快捷方式${NC}"
+    else
+        echo -e "${YELLOW}未删除任何快捷方式${NC}"
+    fi
+    sleep 2
+}
+
+# 快捷方式管理菜单
+shortcut_menu() {
+    while true; do
+        echo -e "${CYAN}=== 快捷方式管理 ===${NC}"
+        echo -e "1. 创建快捷方式 (zf)"
+        echo -e "2. 删除快捷方式"
+        echo -e "00. 返回主菜单"
+        echo -e "${CYAN}===================${NC}"
+        
+        read -p "请选择操作 [1-2, 00]: " choice
+        case $choice in
+            1)
+                create_shortcut
+                ;;
+            2)
+                delete_shortcut
+                ;;
+            00)
+                return
+                ;;
+            *)
+                echo -e "${RED}无效选择!${NC}"
+                ;;
+        esac
+    done
 }
 
 # 创建默认配置 (使用 YAML 格式)
@@ -223,11 +379,14 @@ EOF
 # 备份配置
 backup_config() {
     local timestamp=$(date +%Y%m%d_%H%M%S)
-    cp $CONFIG_FILE "$CONFIG_BACKUP_DIR/config_$timestamp.yaml"
-    cp $RAW_CONF_PATH "$CONFIG_BACKUP_DIR/rawconf_$timestamp"
-    cp $REMARKS_PATH "$CONFIG_BACKUP_DIR/remarks_$timestamp.txt"
-    cp $EXPIRES_PATH "$CONFIG_BACKUP_DIR/expires_$timestamp.txt"
-    echo -e "${GREEN}配置已备份到: $CONFIG_BACKUP_DIR/${NC}"
+    local hostname=$(hostname)
+    local backup_name="${hostname}_backup_${timestamp}"
+    
+    cp $CONFIG_FILE "$CONFIG_BACKUP_DIR/${backup_name}.yaml"
+    cp $RAW_CONF_PATH "$CONFIG_BACKUP_DIR/${backup_name}_rawconf"
+    cp $REMARKS_PATH "$CONFIG_BACKUP_DIR/${backup_name}_remarks.txt"
+    cp $EXPIRES_PATH "$CONFIG_BACKUP_DIR/${backup_name}_expires.txt"
+    echo -e "${GREEN}配置已备份到: $CONFIG_BACKUP_DIR/${backup_name}.yaml${NC}"
 }
 
 # 导入备份配置
@@ -236,7 +395,8 @@ import_config() {
     local backups=($(ls -1 $CONFIG_BACKUP_DIR/*.yaml 2>/dev/null))
     
     if [[ ${#backups[@]} -eq 0 ]]; then
-        echo -e "${RED}没有找到备份文件${NC}"
+        echo -e "${RED}没有找到备份文件，请先备份！${NC}"
+        sleep 2
         return 1
     fi
 
@@ -246,48 +406,19 @@ import_config() {
 
     read -p "请选择要恢复的备份文件编号: " choice
     if [[ $choice -ge 1 && $choice -le ${#backups[@]} ]]; then
-        local selected_file="${backups[$((choice-1))]}"
-        local base_name=$(basename "$selected_file" .yaml | sed 's/config_//')
+        local selected_file="${backcuts[$((choice-1))]}"
+        local base_name=$(basename "$selected_file" .yaml)
         
         cp "$selected_file" $CONFIG_FILE
-        cp "$CONFIG_BACKUP_DIR/rawconf_$base_name" $RAW_CONF_PATH 2>/dev/null
-        cp "$CONFIG_BACKUP_DIR/remarks_$base_name.txt" $REMARKS_PATH 2>/dev/null
-        cp "$CONFIG_BACKUP_DIR/expires_$base_name.txt" $EXPIRES_PATH 2>/dev/null
+        cp "$CONFIG_BACKUP_DIR/${base_name}_rawconf" $RAW_CONF_PATH 2>/dev/null
+        cp "$CONFIG_BACKUP_DIR/${base_name}_remarks.txt" $REMARKS_PATH 2>/dev/null
+        cp "$CONFIG_BACKUP_DIR/${base_name}_expires.txt" $EXPIRES_PATH 2>/dev/null
         
         systemctl restart gost
         echo -e "${GREEN}配置已从备份恢复${NC}"
     else
         echo -e "${RED}无效的选择${NC}"
     fi
-}
-
-# 更新 Gost
-update_gost() {
-    echo -e "${YELLOW}开始更新 Gost...${NC}"
-    
-    # 备份当前配置
-    backup_config
-
-    # 停止服务
-    systemctl stop gost
-
-    # 下载新版本
-    cd /tmp
-    wget -q --show-progress https://github.com/go-gost/gost/releases/download/v3.2.4/gost_3.2.4_linux_amd64.tar.gz
-    if [[ $? -ne 0 ]]; then
-        echo -e "${RED}下载 Gost 失败${NC}"
-        exit 1
-    fi
-
-    # 解压并更新
-    tar -xzf gost_3.2.4_linux_amd64.tar.gz
-    cp gost /usr/local/bin/
-    chmod +x /usr/local/bin/gost
-
-    # 启动服务
-    systemctl start gost
-
-    echo -e "${GREEN}Gost 更新完成!${NC}"
 }
 
 # 卸载 Gost
@@ -304,8 +435,11 @@ uninstall_gost() {
     rm -rf /etc/gost
     rm -f /usr/local/bin/gost-expire-check.sh
     rm -f /usr/local/bin/gost-traffic-monitor.sh
+    rm -f /usr/local/bin/gost-monitor.sh
     rm -f /etc/cron.d/gost-expire
+    rm -f /etc/cron.d/gost-monitor
     rm -f /usr/local/bin/gost-manager.sh
+    rm -f /usr/bin/zf
     rm -f /usr/bin/g
 
     # 重载系统服务
@@ -322,13 +456,12 @@ service_management() {
         echo -e "2. 停止 Gost"
         echo -e "3. 重启 Gost"
         echo -e "4. 查看服务状态"
-        echo -e "5. 查看服务日志"
-        echo -e "6. 启用开机自启"
-        echo -e "7. 禁用开机自启"
+        echo -e "5. 启用开机自启"
+        echo -e "6. 禁用开机自启"
         echo -e "00. 返回主菜单"
         echo -e "${CYAN}================${NC}"
         
-        read -p "请选择操作 [1-7, 00]: " choice
+        read -p "请选择操作 [1-6, 00]: " choice
         case $choice in
             1)
                 systemctl start gost
@@ -346,13 +479,10 @@ service_management() {
                 systemctl status gost --no-pager -l
                 ;;
             5)
-                journalctl -u gost -n 50 --no-pager
-                ;;
-            6)
                 systemctl enable gost
                 echo -e "${GREEN}已启用开机自启${NC}"
                 ;;
-            7)
+            6)
                 systemctl disable gost
                 echo -e "${YELLOW}已禁用开机自启${NC}"
                 ;;
@@ -523,7 +653,7 @@ delete_rule() {
         deleted_ports="$deleted_ports $port"
     done
 
-    if [ -n "$deleted_ports" ]; then
+    if [ -n "$deleted_ports" ]]; then
         rebuild_config
         systemctl restart gost
         echo -e "${GREEN}已删除端口:${deleted_ports}${NC}"
@@ -551,26 +681,20 @@ reset_config() {
     echo -e "${GREEN}配置已重置为默认状态${NC}"
 }
 
-# 显示状态
-show_status() {
-    systemctl status gost --no-pager -l
-}
-
 # 检查端口占用
 check_port() {
     read -p "请输入要检查的端口: " port
     if ss -tuln | grep ":${port} " > /dev/null; then
-        echo -e "${RED}端口 ${port} 已被占用:${NC}"
+        echo -e "${RED}================================${NC}"
+        echo -e "${RED}〓〓〓 端口 ${port} 已被占用 〓〓〓${NC}"
+        echo -e "${RED}================================${NC}"
         ss -tuln | grep ":${port} "
+        echo -e "${RED}================================${NC}"
     else
-        echo -e "${GREEN}端口 ${port} 可用${NC}"
+        echo -e "${PURPLE}================================${NC}"
+        echo -e "${PURPLE}〓〓〓 端口 ${port} 可用 〓〓〓${NC}"
+        echo -e "${PURPLE}================================${NC}"
     fi
-}
-
-# 查看监听端口
-show_listening_ports() {
-    echo -e "${YELLOW}Gost 监听端口:${NC}"
-    ss -tuln | grep gost || echo -e "${YELLOW}没有找到 Gost 监听端口${NC}"
 }
 
 # 配置管理菜单
@@ -583,11 +707,10 @@ config_menu() {
         echo -e "4. 查看完整配置"
         echo -e "5. 重置所有配置"
         echo -e "6. 检查端口占用"
-        echo -e "7. 查看监听端口"
         echo -e "00. 返回主菜单"
         echo -e "${CYAN}================${NC}"
         
-        read -p "请选择操作 [1-7, 00]: " choice
+        read -p "请选择操作 [1-6, 00]: " choice
         case $choice in
             1) add_dual_forward ;;
             2) delete_rule ;;
@@ -595,7 +718,6 @@ config_menu() {
             4) view_full_config ;;
             5) reset_config ;;
             6) check_port ;;
-            7) show_listening_ports ;;
             00)
                 return
                 ;;
@@ -610,21 +732,31 @@ config_menu() {
 show_menu() {
     clear
     show_time
+    
+    # 获取系统信息
+    local gost_version=$(get_gost_version)
+    local gost_status=$(get_gost_status)
+    local stats=$(get_rules_stats)
+    local active_count=$(echo $stats | awk '{print $1}')
+    local expired_count=$(echo $stats | awk '{print $2}')
+    
     echo -e "${BLUE}================================${NC}"
-    echo -e "${BLUE}   Gost TCP+UDP 转发脚本 v1.0.1   ${NC}"
+    echo -e "${BLUE}   Gost TCP+UDP 端口转发 1.1 Pro版   ${NC}"
     echo -e "${BLUE}================================${NC}"
-    echo -e "1. 安装 Gost"
-    echo -e "2. 更新 Gost"
-    echo -e "3. 卸载 Gost"
-    echo -e "4. 服务管理 (启动/停止/重启)"
-    echo -e "5. 配置管理"
-    echo -e "6. 查看状态"
-    echo -e "7. 备份配置"
-    echo -e "8. 导入备份"
-    echo -e "9. 创建快捷方式"
+    echo -e "Gost版本: ${YELLOW}${gost_version}${NC}"
+    echo -e "服务状态: ${gost_status}"
+    echo -e "转发规则: ${GREEN}有效 ${active_count}${NC} | ${RED}过期 ${expired_count}${NC}"
+    echo -e "${BLUE}================================${NC}"
+    echo -e "1. 安装 Gost (v3.2.4)"
+    echo -e "2. 卸载 Gost"
+    echo -e "3. 服务管理 (启动/停止/重启)"
+    echo -e "4. 配置管理"
+    echo -e "5. 备份配置"
+    echo -e "6. 导入备份"
+    echo -e "7. 快捷方式管理"
     echo -e "00. 退出"
     echo -e "${BLUE}================================${NC}"
-    echo -e "${YELLOW}提示: 使用命令 'g' 可快速打开此面板${NC}"
+    echo -e "${YELLOW}提示: 使用命令 'zf' 可快速打开此面板${NC}"
     echo
 }
 
@@ -635,35 +767,29 @@ main() {
 
     while true; do
         show_menu
-        read -p "请选择操作 [1-9, 00]: " choice
+        read -p "请选择操作 [1-7, 00]: " choice
         case $choice in
             1)
                 install_dependencies
                 install_gost
                 ;;
             2)
-                update_gost
-                ;;
-            3)
                 uninstall_gost
                 ;;
-            4)
+            3)
                 service_management
                 ;;
-            5)
+            4)
                 config_menu
                 ;;
-            6)
-                show_status
-                ;;
-            7)
+            5)
                 backup_config
                 ;;
-            8)
+            6)
                 import_config
                 ;;
-            9)
-                create_shortcut
+            7)
+                shortcut_menu
                 ;;
             00)
                 echo -e "${GREEN}再见!${NC}"
@@ -686,16 +812,9 @@ else
             install_dependencies
             install_gost
             ;;
-        update)
-            check_root
-            update_gost
-            ;;
         uninstall)
             check_root
             uninstall_gost
-            ;;
-        status)
-            show_status
             ;;
         start)
             systemctl start gost
@@ -722,10 +841,10 @@ else
             config_menu
             ;;
         shortcut)
-            create_shortcut
+            shortcut_menu
             ;;
         *)
-            echo "用法: $0 {install|update|uninstall|status|start|stop|restart|enable|disable|backup|import|config|shortcut}"
+            echo "用法: $0 {install|uninstall|start|stop|restart|enable|disable|backup|import|config|shortcut}"
             exit 1
             ;;
     esac
