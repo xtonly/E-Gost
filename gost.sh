@@ -162,8 +162,12 @@ EOF
 create_shortcut() {
     echo -e "${YELLOW}创建快捷命令...${NC}"
     
+    # 获取当前脚本的绝对路径
+    local script_path=$(readlink -f "$0")
+    local script_name=$(basename "$script_path")
+    
     # 复制脚本到系统路径
-    cp "$0" /usr/local/bin/gost-manager.sh
+    cp "$script_path" /usr/local/bin/gost-manager.sh
     chmod +x /usr/local/bin/gost-manager.sh
     
     # 创建软链接
@@ -400,13 +404,13 @@ import_config() {
         return 1
     fi
 
-    for i in "${!backups[@]}"; do
+    for i in "${!backcuts[@]}"; do
         echo "$((i+1)). ${backups[$i]}"
     done
 
     read -p "请选择要恢复的备份文件编号: " choice
     if [[ $choice -ge 1 && $choice -le ${#backups[@]} ]]; then
-        local selected_file="${backcuts[$((choice-1))]}"
+        local selected_file="${backups[$((choice-1))]}"
         local base_name=$(basename "$selected_file" .yaml)
         
         cp "$selected_file" $CONFIG_FILE
@@ -653,7 +657,7 @@ delete_rule() {
         deleted_ports="$deleted_ports $port"
     done
 
-    if [ -n "$deleted_ports" ]]; then
+    if [ -n "$deleted_ports" ]; then
         rebuild_config
         systemctl restart gost
         echo -e "${GREEN}已删除端口:${deleted_ports}${NC}"
