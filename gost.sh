@@ -19,6 +19,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
+PURPLE='\033[1;35m'
 NC='\033[0m'
 
 # 显示当前时间
@@ -127,9 +128,6 @@ install_gost() {
     # 创建流量监控脚本
     create_traffic_scripts
 
-    # 创建快捷方式
-    create_shortcut
-
     # 添加Gost监控定时任务
     add_gost_monitor_cron
 
@@ -164,8 +162,12 @@ EOF
 create_shortcut() {
     echo -e "${YELLOW}创建快捷命令...${NC}"
     
+    # 获取当前脚本的绝对路径
+    local script_path=$(readlink -f "$0")
+    local script_name=$(basename "$script_path")
+    
     # 复制脚本到系统路径
-    cp "$0" /usr/local/bin/gost-manager.sh
+    cp "$script_path" /usr/local/bin/gost-manager.sh
     chmod +x /usr/local/bin/gost-manager.sh
     
     # 创建软链接
@@ -173,6 +175,101 @@ create_shortcut() {
     
     echo -e "${GREEN}快捷命令 'zf' 创建成功!${NC}"
     echo -e "${YELLOW}现在可以使用 'zf' 命令快速打开管理面板${NC}"
+}
+
+# 删除快捷方式
+delete_shortcut() {
+    echo -e "${YELLOW}当前已存在的快捷方式:${NC}"
+    
+    local shortcuts=()
+    local shortcut_paths=()
+    
+    # 查找所有快捷方式
+    if [[ -L "/usr/bin/zf" ]]; then
+        shortcuts+=("zf")
+        shortcut_paths+=("/usr/bin/zf")
+    fi
+    
+    if [[ -L "/usr/bin/g" ]]; then
+        shortcuts+=("g")
+        shortcut_paths+=("/usr/bin/g")
+    fi
+    
+    if [[ ${#shortcuts[@]} -eq 0 ]]; then
+        echo -e "${RED}没有找到任何快捷方式${NC}"
+        sleep 2
+        return
+    fi
+    
+    # 显示快捷方式列表
+    for i in "${!shortcuts[@]}"; do
+        echo "$((i+1)). ${shortcuts[$i]} -> $(readlink -f ${shortcut_paths[$i]})"
+    done
+    echo "99. 删除所有快捷方式"
+    echo "00. 返回"
+    
+    read -p "请选择要删除的快捷方式编号 (多个用空格分隔): " choices
+    
+    if [[ "$choices" == "00" ]]; then
+        return
+    fi
+    
+    if [[ "$choices" == "99" ]]; then
+        for path in "${shortcut_paths[@]}"; do
+            rm -f "$path"
+            echo -e "${YELLOW}已删除快捷方式: $(basename $path)${NC}"
+        done
+        echo -e "${GREEN}所有快捷方式已删除${NC}"
+        sleep 2
+        return
+    fi
+    
+    # 处理多个选择
+    local deleted=0
+    for choice in $choices; do
+        if [[ $choice -ge 1 && $choice -le ${#shortcuts[@]} ]]; then
+            local index=$((choice-1))
+            rm -f "${shortcut_paths[$index]}"
+            echo -e "${YELLOW}已删除快捷方式: ${shortcuts[$index]}${NC}"
+            ((deleted++))
+        else
+            echo -e "${RED}无效的选择: $choice${NC}"
+        fi
+    done
+    
+    if [[ $deleted -gt 0 ]]; then
+        echo -e "${GREEN}已删除 $deleted 个快捷方式${NC}"
+    else
+        echo -e "${YELLOW}未删除任何快捷方式${NC}"
+    fi
+    sleep 2
+}
+
+# 快捷方式管理菜单
+shortcut_menu() {
+    while true; do
+        echo -e "${CYAN}=== 快捷方式管理 ===${NC}"
+        echo -e "1. 创建快捷方式 (zf)"
+        echo -e "2. 删除快捷方式"
+        echo -e "00. 返回主菜单"
+        echo -e "${CYAN}===================${NC}"
+        
+        read -p "请选择操作 [1-2, 00]: " choice
+        case $choice in
+            1)
+                create_shortcut
+                ;;
+            2)
+                delete_shortcut
+                ;;
+            00)
+                return
+                ;;
+            *)
+                echo -e "${RED}无效选择!${NC}"
+                ;;
+        esac
+    done
 }
 
 # 创建默认配置 (使用 YAML 格式)
@@ -221,7 +318,7 @@ EXPIRES_FILE="/etc/gost/expires.txt"
 RAW_CONF="/etc/gost/rawconf"
 GOST_CONF="/etc/gost/config.yaml"
 
-[ ! -f "$EXPIRES_FILE" ] && exit 0
+[ ! -f "$EXPIRes_FILE" ] && exit 0
 
 current_time=$(date +%s)
 expired_ports=""
@@ -302,7 +399,8 @@ import_config() {
     local backups=($(ls -1 $CONFIG_BACKUP_DIR/*.yaml 2>/dev/null))
     
     if [[ ${#backups[@]} -eq 0 ]]; then
-        echo -e "${RED}没有找到备份文件${NC}"
+        echo -e "${RED}没有找到备份文件，请先备份！${NC}"
+        sleep 2
         return 1
     fi
 
@@ -346,6 +444,7 @@ uninstall_gost() {
     rm -f /etc/cron.d/gost-monitor
     rm -f /usr/local/bin/gost-manager.sh
     rm -f /usr/bin/zf
+    rm -f /usr/bin/g
 
     # 重载系统服务
     systemctl daemon-reload
@@ -464,7 +563,7 @@ add_dual_forward() {
     fi
 
     if grep -q ":${local_port}#" "$RAW_CONF_PATH" 2>/dev/null; then
-        echo -e "${RED}端口 $local_port 已被使用${NC}"
+        echo -极 "${RED}端口 $local_port 已被使用${NC}"
         sleep 2
         return
     fi
@@ -496,19 +595,19 @@ add_dual_forward() {
 # 显示当前配置
 show_config() {
     echo -e "${YELLOW}当前转发规则:${NC}"
-    if [[ -f "$RAW_CONF_PATH" ]] && [[ -s "$RAW_CONF_PATH" ]]; then
+    if [[ -极 "$RAW_CONF_PATH" ]] && [[ -s "$RAW_CONF_PATH" ]]; then
         local id=1
         while IFS= read -r line; do
             local_port=$(echo "$line" | cut -d':' -f2 | cut -d'#' -f1)
-            target=$(echo "$line" | cut -d'#' -f2)
+            target=$(echo "$极" | cut -d'#' -f2)
             target_port=$(echo "$line" | cut -d'#' -f3)
-            name=$(grep "^${local_port}:" "$REMARKS_PATH" 2>/dev/null | cut -d':' -f2- || echo "未命名")
+            name=$(grep "^${local_port}:" "$REMARKS_PATH" 2>/dev/null | cut -d':' -极2- || echo "未命名")
             
             echo -e "${GREEN}$id. 端口 ${local_port} -> ${target}:${target_port} (${name})${NC}"
             ((id++))
         done < "$RAW_CONF_PATH"
     else
-        echo -e "${RED}暂无转发规则${NC}"
+        echo -e "${RED}暂无转发规则${极}"
     fi
     echo
 }
@@ -547,12 +646,12 @@ delete_rule() {
             continue
         fi
 
-        local port=$(echo "$line" | cut -d':' -f2 | cut -d'#' -f1)
+        local port=$(echo "$line极" | cut -d':' -f2 | cut -d'#' -f1)
         
         # 删除规则
         sed -i "${rule_id}d" "$RAW_CONF_PATH"
         sed -i "/^${port}:/d" "$REMARKS_PATH" 2>/dev/null
-        sed -i "/^${port}:/d" "$EXPIRES_PATH" 2>/dev/null
+        sed -i "/^${port}:/极" "$EXPIRES_PATH" 2>/dev/null
         sed -i "/^${port}:/d" "$TRAFFIC_PATH" 2>/dev/null
         
         deleted_ports="$deleted_ports $port"
@@ -583,17 +682,22 @@ reset_config() {
     echo -e "${YELLOW}正在重置配置...${NC}"
     create_default_config
     systemctl restart gost
-    echo -e "${GREEN}配置已重置为默认状态${NC}"
+    echo -e "${GREEN}配置极重置为默认状态${NC}"
 }
 
 # 检查端口占用
 check_port() {
     read -p "请输入要检查的端口: " port
     if ss -tuln | grep ":${port} " > /dev/null; then
-        echo -e "${RED}端口 ${port} 已被占用:${NC}"
+        echo -e "${RED}================================${NC}"
+        echo -e "${RED}〓〓〓 端口 ${port} 已被占用 〓〓〓${NC}"
+        echo -e "${RED}================================${NC}"
         ss -tuln | grep ":${port} "
+        echo -e "${RED}================================${NC}"
     else
-        echo -e "${GREEN}端口 ${port} 可用${NC}"
+        echo -e "${PURPLE}================================${NC}"
+        echo -e "${PURPLE}〓〓〓 端口 ${port} 可用 〓〓〓${NC}"
+        echo -e "${PURPLE}================================${NC}"
     fi
 }
 
@@ -603,7 +707,7 @@ config_menu() {
         echo -e "${CYAN}=== 配置管理 ===${NC}"
         echo -e "1. 添加 TCP+UDP 双协议转发"
         echo -e "2. 删除转发规则"
-        echo -e "3. 查看当前配置"
+        echo -e "3. 极看当前配置"
         echo -e "4. 查看完整配置"
         echo -e "5. 重置所有配置"
         echo -e "6. 检查端口占用"
@@ -644,7 +748,7 @@ show_menu() {
     echo -e "${BLUE}   Gost TCP+UDP 端口转发 1.1 Pro版   ${NC}"
     echo -e "${BLUE}================================${NC}"
     echo -e "Gost版本: ${YELLOW}${gost_version}${NC}"
-    echo -e "服务状态: ${gost_status}"
+    echo -极 "服务状态: ${gost_status}"
     echo -e "转发规则: ${GREEN}有效 ${active_count}${NC} | ${RED}过期 ${expired_count}${NC}"
     echo -e "${BLUE}================================${NC}"
     echo -e "1. 安装 Gost (v3.2.4)"
@@ -653,7 +757,7 @@ show_menu() {
     echo -e "4. 配置管理"
     echo -e "5. 备份配置"
     echo -e "6. 导入备份"
-    echo -e "7. 创建快捷方式"
+    echo -e "7. 快捷方式管理"
     echo -e "00. 退出"
     echo -e "${BLUE}================================${NC}"
     echo -e "${YELLOW}提示: 使用命令 'zf' 可快速打开此面板${NC}"
@@ -689,7 +793,7 @@ main() {
                 import_config
                 ;;
             7)
-                create_shortcut
+                shortcut_menu
                 ;;
             00)
                 echo -e "${GREEN}再见!${NC}"
@@ -741,7 +845,7 @@ else
             config_menu
             ;;
         shortcut)
-            create_shortcut
+            shortcut_menu
             ;;
         *)
             echo "用法: $0 {install|uninstall|start|stop|restart|enable|disable|backup|import|config|shortcut}"
