@@ -13,7 +13,7 @@
 
 启动脚本
 
-wget --no-check-certificate -O gost.sh https://raw.githubusercontent.com/xtonly/E-Gost/master/egost.sh && chmod +x egost.sh && ./egost.sh
+wget --no-check-certificate -O gost.sh https://raw.githubusercontent.com/xtonly/E-Gost/master/gost.sh && chmod +x gost.sh && ./gost.sh
 
 再次运行本脚本只需要输入./gost.sh回车,或者运行脚本 9 选项，下次root直接输入 g 打开脚本！
 
