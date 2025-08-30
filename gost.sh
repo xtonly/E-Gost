@@ -318,7 +318,7 @@ EXPIRES_FILE="/etc/gost/expires.txt"
 RAW_CONF="/etc/gost/rawconf"
 GOST_CONF="/etc/gost/config.yaml"
 
-[ ! -f "$EXPIRes_FILE" ] && exit 0
+[ ! -f "$EXPIRES_FILE" ] && exit 0
 
 current_time=$(date +%s)
 expired_ports=""
@@ -563,7 +563,7 @@ add_dual_forward() {
     fi
 
     if grep -q ":${local_port}#" "$RAW_CONF_PATH" 2>/dev/null; then
-        echo - "${RED}端口 $local_port 已被使用${NC}"
+        echo -e "${RED}端口 $local_port 已被使用${NC}"
         sleep 2
         return
     fi
@@ -595,19 +595,19 @@ add_dual_forward() {
 # 显示当前配置
 show_config() {
     echo -e "${YELLOW}当前转发规则:${NC}"
-    if [[ - "$RAW_CONF_PATH" ]] && [[ -s "$RAW_CONF_PATH" ]]; then
+    if [[ -f "$RAW_CONF_PATH" ]] && [[ -s "$RAW_CONF_PATH" ]]; then
         local id=1
         while IFS= read -r line; do
             local_port=$(echo "$line" | cut -d':' -f2 | cut -d'#' -f1)
-            target=$(echo "$" | cut -d'#' -f2)
+            target=$(echo "$line" | cut -d'#' -f2)
             target_port=$(echo "$line" | cut -d'#' -f3)
-            name=$(grep "^${local_port}:" "$REMARKS_PATH" 2>/dev/null | cut -d':' -2- || echo "未命名")
+            name=$(grep "^${local_port}:" "$REMARKS_PATH" 2>/dev/null | cut -d':' -f2- || echo "未命名")
             
             echo -e "${GREEN}$id. 端口 ${local_port} -> ${target}:${target_port} (${name})${NC}"
             ((id++))
         done < "$RAW_CONF_PATH"
     else
-        echo -e "${RED}暂无转发规则${}"
+        echo -e "${RED}暂无转发规则${NC}"
     fi
     echo
 }
@@ -646,12 +646,12 @@ delete_rule() {
             continue
         fi
 
-        local port=$(echo "$line极" | cut -d':' -f2 | cut -d'#' -f1)
+        local port=$(echo "$line" | cut -d':' -f2 | cut -d'#' -f1)
         
         # 删除规则
         sed -i "${rule_id}d" "$RAW_CONF_PATH"
         sed -i "/^${port}:/d" "$REMARKS_PATH" 2>/dev/null
-        sed -i "/^${port}:/极" "$EXPIRES_PATH" 2>/dev/null
+        sed -i "/^${port}:/d" "$EXPIRES_PATH" 2>/dev/null
         sed -i "/^${port}:/d" "$TRAFFIC_PATH" 2>/dev/null
         
         deleted_ports="$deleted_ports $port"
@@ -682,7 +682,7 @@ reset_config() {
     echo -e "${YELLOW}正在重置配置...${NC}"
     create_default_config
     systemctl restart gost
-    echo -e "${GREEN}配置极重置为默认状态${NC}"
+    echo -e "${GREEN}配置已重置为默认状态${NC}"
 }
 
 # 检查端口占用
@@ -707,7 +707,7 @@ config_menu() {
         echo -e "${CYAN}=== 配置管理 ===${NC}"
         echo -e "1. 添加 TCP+UDP 双协议转发"
         echo -e "2. 删除转发规则"
-        echo -e "3. 极看当前配置"
+        echo -e "3. 查看当前配置"
         echo -e "4. 查看完整配置"
         echo -e "5. 重置所有配置"
         echo -e "6. 检查端口占用"
@@ -748,7 +748,7 @@ show_menu() {
     echo -e "${BLUE}   Gost TCP+UDP 端口转发 1.1 Pro版   ${NC}"
     echo -e "${BLUE}================================${NC}"
     echo -e "Gost版本: ${YELLOW}${gost_version}${NC}"
-    echo -极 "服务状态: ${gost_status}"
+    echo -e "服务状态: ${gost_status}"
     echo -e "转发规则: ${GREEN}有效 ${active_count}${NC} | ${RED}过期 ${expired_count}${NC}"
     echo -e "${BLUE}================================${NC}"
     echo -e "1. 安装 Gost (v3.2.4)"
