@@ -563,7 +563,7 @@ add_dual_forward() {
     fi
 
     if grep -q ":${local_port}#" "$RAW_CONF_PATH" 2>/dev/null; then
-        echo -极 "${RED}端口 $local_port 已被使用${NC}"
+        echo - "${RED}端口 $local_port 已被使用${NC}"
         sleep 2
         return
     fi
@@ -595,19 +595,19 @@ add_dual_forward() {
 # 显示当前配置
 show_config() {
     echo -e "${YELLOW}当前转发规则:${NC}"
-    if [[ -极 "$RAW_CONF_PATH" ]] && [[ -s "$RAW_CONF_PATH" ]]; then
+    if [[ - "$RAW_CONF_PATH" ]] && [[ -s "$RAW_CONF_PATH" ]]; then
         local id=1
         while IFS= read -r line; do
             local_port=$(echo "$line" | cut -d':' -f2 | cut -d'#' -f1)
-            target=$(echo "$极" | cut -d'#' -f2)
+            target=$(echo "$" | cut -d'#' -f2)
             target_port=$(echo "$line" | cut -d'#' -f3)
-            name=$(grep "^${local_port}:" "$REMARKS_PATH" 2>/dev/null | cut -d':' -极2- || echo "未命名")
+            name=$(grep "^${local_port}:" "$REMARKS_PATH" 2>/dev/null | cut -d':' -2- || echo "未命名")
             
             echo -e "${GREEN}$id. 端口 ${local_port} -> ${target}:${target_port} (${name})${NC}"
             ((id++))
         done < "$RAW_CONF_PATH"
     else
-        echo -e "${RED}暂无转发规则${极}"
+        echo -e "${RED}暂无转发规则${}"
     fi
     echo
 }
