@@ -11,7 +11,6 @@ CONFIG_BACKUP_DIR="/etc/gost/backups"
 RAW_CONF_PATH="/etc/gost/rawconf"
 REMARKS_PATH="/etc/gost/remarks.txt"
 EXPIRES_PATH="/etc/gost/expires.txt"
-TRAFFIC_PATH="/etc/gost/traffic.db"
 
 # 颜色定义
 RED='\033[0;31m'
@@ -124,9 +123,6 @@ install_gost() {
     systemctl daemon-reload
     systemctl enable gost
     systemctl start gost
-
-    # 创建流量监控脚本
-    create_traffic_scripts
 
     # 添加Gost监控定时任务
     add_gost_monitor_cron
@@ -282,7 +278,7 @@ services: []
 EOF
     
     # 初始化其他配置文件
-    touch $RAW_CONF_PATH $REMARKS_PATH $EXPIRES_PATH $TRAFFIC_PATH
+    touch $RAW_CONF_PATH $REMARKS_PATH $EXPIRES_PATH
 }
 
 # 创建系统服务
@@ -307,77 +303,6 @@ SyslogIdentifier=gost
 [Install]
 WantedBy=multi-user.target
 EOF
-}
-
-# 创建流量监控脚本
-create_traffic_scripts() {
-    # 到期检查脚本
-    cat > /usr/local/bin/gost-expire-check.sh << 'EOF'
-#!/bin/bash
-EXPIRES_FILE="/etc/gost/expires.txt"
-RAW_CONF="/etc/gost/rawconf"
-GOST_CONF="/etc/gost/config.yaml"
-
-[ ! -f "$EXPIRES_FILE" ] && exit 0
-
-current_time=$(date +%s)
-expired_ports=""
-need_rebuild=false
-
-while IFS=: read -r port expire_date; do
-    if [ "$expire_date" != "永久" ] && [ "$expire_date" -le "$current_time" ]; then
-        expired_ports="$expired_ports $port"
-        need_rebuild=true
-    fi
-done < "$EXPIRES_FILE"
-
-if [ "$need_rebuild" = true ]; then
-    for port in $expired_ports; do
-        sed -i "/:${port}#/d" "$RAW_CONF"
-        sed -i "/^${port}:/d" "$EXPIRES_FILE"
-        sed -i "/^${port}:/d" "/etc/gost/remarks.txt"
-        echo "[$(date)] 端口 $port 的转发规则已过期并删除" >> /var/log/gost.log
-    done
-    rebuild_config
-    systemctl restart gost >/dev/null 2>&1
-fi
-EOF
-
-    # 流量监控脚本
-    cat > /usr/local/bin/gost-traffic-monitor.sh << 'EOF'
-#!/bin/bash
-TRAFFIC_DB="/etc/gost/traffic.db"
-RAW_CONF="/etc/gost/rawconf"
-
-[ ! -f "$RAW_CONF" ] && exit 0
-
-touch "$TRAFFIC_DB"
-
-while IFS= read -r line; do
-    port=$(echo "$line" | cut -d':' -f2 | cut -d'#' -f1)
-    total_bytes=0
-    
-    # 获取端口的流量统计（这里需要根据实际监控方式实现）
-    # 这只是一个示例，实际需要根据你的监控系统来获取流量数据
-    
-    old_data=$(grep "^$port:" "$TRAFFIC_DB" 2>/dev/null)
-    if [ -n "$old_data" ]; then
-        old_total=$(echo "$old_data" | cut -d: -f2)
-        new_total=$((old_total + total_bytes))
-        sed -i "/^$port:/d" "$TRAFFIC_DB"
-        echo "$port:$new_total" >> "$TRAFFIC_DB"
-    else
-        echo "$port:$total_bytes" >> "$TRAFFIC_DB"
-    fi
-done < "$RAW_CONF"
-EOF
-
-    chmod +x /usr/local/bin/gost-expire-check.sh
-    chmod +x /usr/local/bin/gost-traffic-monitor.sh
-
-    # 添加定时任务
-    echo "0 * * * * root /usr/local/bin/gost-expire-check.sh >/dev/null 2>&1" > /etc/cron.d/gost-expire
-    echo "*/5 * * * * root /usr/local/bin/gost-traffic-monitor.sh >/dev/null 2>&1" >> /etc/cron.d/gost-expire
 }
 
 # 备份配置
@@ -437,10 +362,7 @@ uninstall_gost() {
     rm -f $BINARY_PATH
     rm -f $SERVICE_FILE
     rm -rf /etc/gost
-    rm -f /usr/local/bin/gost-expire-check.sh
-    rm -f /usr/local/bin/gost-traffic-monitor.sh
     rm -f /usr/local/bin/gost-monitor.sh
-    rm -f /etc/cron.d/gost-expire
     rm -f /etc/cron.d/gost-monitor
     rm -f /usr/local/bin/gost-manager.sh
     rm -f /usr/bin/zf
@@ -652,7 +574,6 @@ delete_rule() {
         sed -i "${rule_id}d" "$RAW_CONF_PATH"
         sed -i "/^${port}:/d" "$REMARKS_PATH" 2>/dev/null
         sed -i "/^${port}:/d" "$EXPIRES_PATH" 2>/dev/null
-        sed -i "/^${port}:/d" "$TRAFFIC_PATH" 2>/dev/null
         
         deleted_ports="$deleted_ports $port"
     done
@@ -667,6 +588,34 @@ delete_rule() {
     sleep 2
 }
 
+# 删除所有转发规则
+delete_all_rules() {
+    if [ ! -f "$RAW_CONF_PATH" ] || [ ! -s "$RAW_CONF_PATH" ]; then
+        echo -e "${RED}暂无转发规则${NC}"
+        sleep 2
+        return
+    fi
+    
+    read -p "确定要删除所有转发规则吗？(y/n): " confirm
+    if [[ $confirm != "y" && $confirm != "Y" ]]; then
+        echo -e "${YELLOW}已取消操作${NC}"
+        sleep 2
+        return
+    fi
+    
+    # 清空所有配置文件
+    > "$RAW_CONF_PATH"
+    > "$REMARKS_PATH"
+    > "$EXPIRES_PATH"
+    
+    # 重建配置
+    rebuild_config
+    systemctl restart gost
+    
+    echo -e "${GREEN}已删除所有转发规则${NC}"
+    sleep 2
+}
+
 # 查看完整配置
 view_full_config() {
     if [[ -f $CONFIG_FILE ]]; then
@@ -675,14 +624,6 @@ view_full_config() {
     else
         echo -e "${RED}配置文件不存在${NC}"
     fi
-}
-
-# 重置配置
-reset_config() {
-    echo -e "${YELLOW}正在重置配置...${NC}"
-    create_default_config
-    systemctl restart gost
-    echo -e "${GREEN}配置已重置为默认状态${NC}"
 }
 
 # 检查端口占用
@@ -707,9 +648,9 @@ config_menu() {
         echo -e "${CYAN}=== 配置管理 ===${NC}"
         echo -e "1. 添加 TCP+UDP 双协议转发"
         echo -e "2. 删除转发规则"
-        echo -e "3. 查看当前配置"
-        echo -e "4. 查看完整配置"
-        echo -e "5. 重置所有配置"
+        echo -e "3. 删除所有转发规则"
+        echo -e "4. 查看当前配置"
+        echo -e "5. 查看完整配置"
         echo -e "6. 检查端口占用"
         echo -e "00. 返回主菜单"
         echo -e "${CYAN}================${NC}"
@@ -718,9 +659,9 @@ config_menu() {
         case $choice in
             1) add_dual_forward ;;
             2) delete_rule ;;
-            3) show_config ;;
-            4) view_full_config ;;
-            5) reset_config ;;
+            3) delete_all_rules ;;
+            4) show_config ;;
+            5) view_full_config ;;
             6) check_port ;;
             00)
                 return
