@@ -17,7 +17,7 @@ apt-get -y update && apt-get -y upgrade && apt update -y && apt install -y curl 
 
 启动脚本
 ------------------------------------------------------------------------------------------------------------------------------------------------------------
-wget --no-check-certificate -O gost.sh https://raw.githubusercontent.com/xtonly/E-Gost/master/gost.sh && chmod +x gost.sh && ./gost.sh
+wget --no-check-certificate -O egost.sh https://raw.githubusercontent.com/xtonly/E-Gost/refs/heads/main/egost.sh && chmod +x egost.sh && ./egost.sh
 ------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 再次运行本脚本只需要输入./gost.sh回车,或者运行脚本 7 快捷方式菜单中加入快捷方式，下次root直接输入 zf 打开脚本！
