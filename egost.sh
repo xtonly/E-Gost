@@ -1,8 +1,11 @@
 #!/bin/bash
 
-# Gost 管理脚本
+# ==================================================
+# 面板信息# 
 # 支持 TCP+UDP 双协议端口转发
-# 版本: v1.1 Pro版
+# PANEL_VERSION="1.2"
+# UPDATE_LOG="v1.2: 优化菜单显示; 增加端口占用实时检测."
+# ==================================================
 
 CONFIG_FILE="/etc/gost/config.yaml"
 SERVICE_FILE="/etc/systemd/system/gost.service"
@@ -469,34 +472,56 @@ rebuild_config() {
 
 # 添加 TCP+UDP 双协议转发
 add_dual_forward() {
-    read -p "请输入本地监听端口: " local_port
+    echo -e "${YELLOW}添加 TCP+UDP 双协议转发规则...${NC}"
+    
+    while true; do
+        read -p "请输入本地监听端口 (输入 0 返回): " local_port
+
+        if [[ "$local_port" == "0" ]]; then
+            echo -e "${YELLOW}已取消操作。${NC}"
+            return
+        fi
+
+        if [[ ! $local_port =~ ^[0-9]+$ ]] || [[ "$local_port" -lt 1 ]] || [[ "$local_port" -gt 65535 ]]; then
+            echo -e "${RED}错误: 端口无效! 必须是1-65535之间的数字，请重新输入。${NC}"
+            continue
+        fi
+
+        # 检查系统级端口占用
+        if ss -tuln | grep -q ":${local_port} "; then
+            echo -e "${RED}错误: 端口 ${local_port} 正在被其他程序占用，请重新输入!${NC}"
+            continue
+        fi
+        
+        # 检查是否已被Gost规则使用
+        if grep -q ":${local_port}#" "$RAW_CONF_PATH" 2>/dev/null; then
+            echo -e "${RED}错误: 端口 ${local_port} 已被其他Gost规则使用，请重新输入!${NC}"
+            continue
+        fi
+
+        echo -e "${GREEN}端口 ${local_port} 可用，请继续...${NC}"
+        break
+    done
+
     read -p "请输入目标地址: " target
     read -p "请输入目标端口: " target_port
-    read -p "请输入规则名称: " name
+    read -p "请输入规则备注 (可选): " name
 
+    if [[ ! $target_port =~ ^[0-9]+$ ]] || [[ "$target_port" -lt 1 ]] || [[ "$target_port" -gt 65535 ]]; then
+        echo -e "${RED}添加失败: 目标端口无效! 必须是1-65535之间的数字。${NC}"
+        sleep 2
+        return
+    fi
+    
     if [[ -z "$name" ]]; then
-        name="forward-$local_port"
-    fi
-
-    if [[ ! $local_port =~ ^[0-9]+$ ]] || [[ ! $target_port =~ ^[0-9]+$ ]]; then
-        echo -e "${RED}端口必须为数字${NC}"
-        sleep 2
-        return
-    fi
-
-    if grep -q ":${local_port}#" "$RAW_CONF_PATH" 2>/dev/null; then
-        echo -e "${RED}端口 $local_port 已被使用${NC}"
-        sleep 2
-        return
+        name="未命名规则"
     fi
 
     # 添加到原始配置
     echo "forward:${local_port}#${target}#${target_port}" >> "$RAW_CONF_PATH"
     
-    # 添加规则名称
-    if [ -n "$name" ]; then
-        echo "${local_port}:${name}" >> "$REMARKS_PATH"
-    fi
+    # 添加规则备注
+    echo "${local_port}:${name}" >> "$REMARKS_PATH"
 
     # 设置永久有效期
     echo "${local_port}:永久" >> "$EXPIRES_PATH"
@@ -507,10 +532,10 @@ add_dual_forward() {
     # 重启服务
     systemctl restart gost
     
-    echo -e "${GREEN}TCP+UDP 双协议转发已添加!${NC}"
-    echo -e "${YELLOW}本地端口: ${local_port}${NC}"
-    echo -e "${YELLOW}目标地址: ${target}:${target_port}${NC}"
-    echo -e "${YELLOW}规则名称: ${name}${NC}"
+    echo -e "${GREEN}添加成功! TCP+UDP 双协议转发已生效。${NC}"
+    echo -e "${YELLOW}  本地端口: ${local_port}${NC}"
+    echo -e "${YELLOW}  目标地址: ${target}:${target_port}${NC}"
+    echo -e "${YELLOW}  规则备注: ${name}${NC}"
     sleep 2
 }
 
@@ -686,9 +711,12 @@ show_menu() {
     local expired_count=$(echo $stats | awk '{print $2}')
     
     echo -e "${BLUE}================================${NC}"
-    echo -e "${BLUE}   Gost TCP+UDP 端口转发 1.1 Pro版   ${NC}"
+    echo -e "${BLUE}           E-Gost 转发面板          ${NC}"
     echo -e "${BLUE}================================${NC}"
-    echo -e "Gost版本: ${YELLOW}${gost_version}${NC}"
+    echo -e "面板版本: ${GREEN}v${PANEL_VERSION}${NC}"
+    echo -e "Gost 版本: ${YELLOW}${gost_version}${NC}"
+    echo -e "更新日志: ${YELLOW}${UPDATE_LOG}${NC}"
+    echo -e "${BLUE}--------------------------------${NC}"
     echo -e "服务状态: ${gost_status}"
     echo -e "转发规则: ${GREEN}有效 ${active_count}${NC} | ${RED}过期 ${expired_count}${NC}"
     echo -e "${BLUE}================================${NC}"
