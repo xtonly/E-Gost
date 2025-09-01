@@ -713,7 +713,7 @@ show_menu() {
     echo -e "${BLUE}           E-Gost 转发面板          ${NC}"
     echo -e "${BLUE}================================${NC}"
     echo -e "面板版本: ${GREEN}v${PANEL_VERSION}${NC}"
-    echo -e "Gost 版本: ${YELLOW}${gost_version}${NC}"
+    echo -e "Gost版本: ${YELLOW}${gost_version}${NC}"
     echo -e "更新日志: ${YELLOW}${UPDATE_LOG}${NC}"
     echo -e "${BLUE}--------------------------------${NC}"
     echo -e "服务状态: ${gost_status}"
