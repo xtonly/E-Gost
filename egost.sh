@@ -2,8 +2,8 @@
 
 # ==================================================
 # 面板信息# 
-PANEL_VERSION="1.2"
-UPDATE_LOG="v1.2: 优化菜单显示; 增加端口占用实时检测."
+PANEL_VERSION="1.3"
+UPDATE_LOG="v1.3: 新增转发规则修改功能."
 # ==================================================
 
 CONFIG_FILE="/etc/gost/config.yaml"
@@ -558,6 +558,90 @@ show_config() {
     echo
 }
 
+# 修改转发规则 (新功能)
+modify_rule() {
+    echo -e "${YELLOW}修改转发规则...${NC}"
+    
+    if [[ ! -f "$RAW_CONF_PATH" ]] || [[ ! -s "$RAW_CONF_PATH" ]]; then
+        echo -e "${RED}暂无转发规则可修改${NC}"; sleep 2; return
+    fi
+    
+    show_config
+    read -p "请输入要修改的规则ID (输入 0 返回): " rule_id
+
+    if [[ "$rule_id" == "0" ]]; then return; fi
+
+    local rule_count=$(wc -l < "$RAW_CONF_PATH")
+    if ! [[ "$rule_id" =~ ^[0-9]+$ ]] || [[ "$rule_id" -lt 1 ]] || [[ "$rule_id" -gt "$rule_count" ]]; then
+        echo -e "${RED}无效的规则ID!${NC}"; sleep 2; return
+    fi
+
+    # 提取当前值
+    local line_to_edit=$(sed -n "${rule_id}p" "$RAW_CONF_PATH")
+    local current_local_port=$(echo "$line_to_edit" | cut -d':' -f2 | cut -d'#' -f1)
+    local current_target=$(echo "$line_to_edit" | cut -d'#' -f2)
+    local current_target_port=$(echo "$line_to_edit" | cut -d'#' -f3)
+    local current_remark=$(grep "^${current_local_port}:" "$REMARKS_PATH" 2>/dev/null | cut -d':' -f2- || echo "未命名")
+    local current_expire=$(grep "^${current_local_port}:" "$EXPIRES_PATH" 2>/dev/null | cut -d':' -f2- || echo "永久")
+    
+    echo -e "${CYAN}--------------------------------------------------${NC}"
+    echo "正在修改规则 #${rule_id}. (直接回车保留原值)"
+
+    # 获取新本地端口
+    while true; do
+        read -p "新本地监听端口 [当前: $current_local_port]: " new_local_port
+        new_local_port=${new_local_port:-$current_local_port}
+
+        if [[ ! $new_local_port =~ ^[0-9]+$ ]] || [[ "$new_local_port" -lt 1 ]] || [[ "$new_local_port" -gt 65535 ]]; then
+            echo -e "${RED}错误: 端口无效! 必须是1-65535之间的数字。${NC}"; continue
+        fi
+        
+        # 仅当端口号改变时，才检查占用情况
+        if [[ "$new_local_port" != "$current_local_port" ]]; then
+            if ss -tuln | grep -q ":${new_local_port} "; then
+                echo -e "${RED}错误: 端口 ${new_local_port} 正在被其他程序占用!${NC}"; continue
+            fi
+            if grep -q ":${new_local_port}#" "$RAW_CONF_PATH" 2>/dev/null; then
+                echo -e "${RED}错误: 端口 ${new_local_port} 已被其他Gost规则使用!${NC}"; continue
+            fi
+        fi
+        break
+    done
+    
+    # 获取新目标地址
+    read -p "新目标地址 [当前: $current_target]: " new_target
+    new_target=${new_target:-$current_target}
+    
+    # 获取新目标端口
+    read -p "新目标端口 [当前: $current_target_port]: " new_target_port
+    new_target_port=${new_target_port:-$current_target_port}
+    if [[ ! $new_target_port =~ ^[0-9]+$ ]] || [[ "$new_target_port" -lt 1 ]] || [[ "$new_target_port" -gt 65535 ]]; then
+        echo -e "${RED}修改失败: 目标端口无效!${NC}"; sleep 2; return
+    fi
+    
+    # 获取新备注
+    read -p "新规则备注 [当前: $current_remark]: " new_remark
+    new_remark=${new_remark:-$current_remark}
+    
+    # --- 应用修改 ---
+    # 1. 删除旧的规则数据
+    sed -i "${rule_id}d" "$RAW_CONF_PATH"
+    sed -i "/^${current_local_port}:/d" "$REMARKS_PATH"
+    sed -i "/^${current_local_port}:/d" "$EXPIRES_PATH"
+    
+    # 2. 添加新的规则数据
+    echo "forward:${new_local_port}#${new_target}#${new_target_port}" >> "$RAW_CONF_PATH"
+    echo "${new_local_port}:${new_remark}" >> "$REMARKS_PATH"
+    echo "${new_local_port}:${current_expire}" >> "$EXPIRES_PATH" # 保留原有的有效期
+    
+    # 3. 重建配置并重启
+    rebuild_config
+    systemctl restart gost
+    
+    echo -e "${GREEN}规则 #${rule_id} 修改成功!${NC}"
+    sleep 2
+}
+
 # 删除转发规则（支持批量删除）
 delete_rule() {
     if [ ! -f "$RAW_CONF_PATH" ] || [ ! -s "$RAW_CONF_PATH" ]; then
@@ -671,22 +755,24 @@ config_menu() {
     while true; do
         echo -e "${CYAN}=== 配置管理 ===${NC}"
         echo -e "1. 添加 TCP+UDP 双协议转发"
-        echo -e "2. 删除转发规则"
-        echo -e "3. 删除所有转发规则"
-        echo -e "4. 查看当前配置"
-        echo -e "5. 查看完整配置"
-        echo -e "6. 检查端口占用"
+        echo -e "2. 修改转发规则"
+        echo -e "3. 删除转发规则"
+        echo -e "4. 删除所有转发规则"
+        echo -e "5. 查看当前配置"
+        echo -e "6. 查看完整配置"
+        echo -e "7. 检查端口占用"
         echo -e "00. 返回主菜单"
         echo -e "${CYAN}================${NC}"
         
-        read -p "请选择操作 [1-6, 00]: " choice
+        read -p "请选择操作 [1-7, 00]: " choice
         case $choice in
             1) add_dual_forward ;;
-            2) delete_rule ;;
-            3) delete_all_rules ;;
-            4) show_config ;;
-            5) view_full_config ;;
-            6) check_port ;;
+            2) modify_rule ;;
+            3) delete_rule ;;
+            4) delete_all_rules ;;
+            5) show_config ;;
+            6) view_full_config ;;
+            7) check_port ;;
             00)
                 return
                 ;;
