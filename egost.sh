@@ -387,26 +387,48 @@ import_config() {
 
 # 卸载 Gost
 uninstall_gost() {
-    echo -e "${YELLOW}开始卸载 Gost...${NC}"
+    echo -e "${RED}正在卸载 Gost...${NC}"
     
-    # 停止服务
-    systemctl stop gost
-    systemctl disable gost
+    # 卸载前确认
+    read -p "确定要卸载 Gost 吗? 此操作将删除程序和配置文件, 但会保留备份。(y/n): " confirm
+    if [[ $confirm != "y" && $confirm != "Y" ]]; then
+        echo -e "${YELLOW}已取消卸载${NC}"
+        sleep 1
+        return
+    fi
+    
+    # 停止并禁用服务
+    systemctl stop gost >/dev/null 2>&1
+    systemctl disable gost >/dev/null 2>&1
 
-    # 删除文件
+    # 删除二进制文件、服务文件和快捷方式等
     rm -f $BINARY_PATH
     rm -f $SERVICE_FILE
-    rm -rf /etc/gost
     rm -f /usr/local/bin/gost-monitor.sh
     rm -f /etc/cron.d/gost-monitor
     rm -f /usr/local/bin/gost-manager.sh
     rm -f /usr/bin/zf
     rm -f /usr/bin/g
 
-    # 重载系统服务
+    # 仅删除配置文件, 保留/etc/gost目录和其中的backups子目录
+    rm -f "$CONFIG_FILE"
+    rm -f "$RAW_CONF_PATH"
+    rm -f "$REMARKS_PATH"
+    rm -f "$EXPIRES_PATH"
+    
+    # 重载系统服务守护进程
     systemctl daemon-reload
 
-    echo -e "${GREEN}Gost 已卸载!${NC}"
+    echo -e "${GREEN}Gost 已成功卸载!${NC}"
+    
+    # 提示备份文件位置
+    if [ -d "$CONFIG_BACKUP_DIR" ]; then
+        echo -e "${YELLOW}配置文件已删除, 备份文件已保留在: ${CONFIG_BACKUP_DIR}${NC}"
+    fi
+    
+    # 等待用户按键返回
+    echo -e "\n按任意键返回主菜单..."
+    read -n 1 -s
 }
 
 # 服务管理
