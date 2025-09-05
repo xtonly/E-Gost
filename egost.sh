@@ -2,8 +2,8 @@
 
 # ==================================================
 # 面板信息#
-PANEL_VERSION="1.4"
-UPDATE_LOG="v1.4: 增加备份恢复菜单, 修复无配置时备份的BUG."
+PANEL_VERSION="1.6"
+UPDATE_LOG="v1.6: 备份管理中新增删除备份功能."
 # ==================================================
 
 CONFIG_FILE="/etc/gost/config.yaml"
@@ -403,6 +403,71 @@ import_config() {
         echo -e "${GREEN}服务已重启!${NC}"
     fi
     sleep 1
+}
+
+# 删除备份文件
+delete_backup() {
+    echo -e "${YELLOW}删除备份文件...${NC}"
+    mkdir -p "$CONFIG_BACKUP_DIR"
+    local backups=($(ls -1 -r "$CONFIG_BACKUP_DIR"/*.yaml 2>/dev/null))
+
+    if [ ${#backups[@]} -eq 0 ]; then
+        echo -e "${RED}没有找到任何备份文件。${NC}"
+        sleep 2
+        return
+    fi
+
+    echo -e "${GREEN}可用的备份文件列表:${NC}"
+    # 列表从1开始编号
+    for i in "${!backups[@]}"; do
+        echo "$((i+1)): ${backups[$i]}"
+    done
+    echo
+
+    read -p "请输入要删除的备份编号 (多个用空格分隔, 输入 0 返回): " choices
+
+    # 检查是否取消
+    if [[ "$choices" == "0" ]]; then
+        echo -e "${YELLOW}已取消删除操作。${NC}"
+        sleep 1
+        return
+    fi
+    
+    if [[ -z "$choices" ]]; then
+        echo -e "${RED}未输入任何编号。${NC}"
+        sleep 2
+        return
+    fi
+
+    local deleted_files=""
+    local sorted_ids=$(echo "$choices" | tr ' ' '\n' | sort -nr | uniq)
+
+    for backup_id in $sorted_ids; do
+        # 验证输入
+        if ! [[ $backup_id =~ ^[1-9][0-9]*$ ]] || [ $backup_id -gt ${#backups[@]} ]; then
+            echo -e "${RED}警告: 无效的备份编号 '${backup_id}', 已跳过。${NC}"
+            continue
+        fi
+
+        local index=$((backup_id - 1))
+        local selected_file="${backups[$index]}"
+        local base_name=$(basename "$selected_file" .yaml)
+
+        # 删除所有关联文件
+        rm -f "$CONFIG_BACKUP_DIR/${base_name}.yaml"
+        rm -f "$CONFIG_BACKUP_DIR/${base_name}_rawconf"
+        rm -f "$CONFIG_BACKUP_DIR/${base_name}_remarks.txt"
+        rm -f "$CONFIG_BACKUP_DIR/${base_name}_expires.txt"
+        
+        deleted_files+="\n - $(basename "$selected_file")"
+    done
+
+    if [ -n "$deleted_files" ]; then
+        echo -e "${GREEN}以下备份文件已被删除:${NC}${deleted_files}"
+    else
+        echo -e "${YELLOW}未删除任何备份文件。${NC}"
+    fi
+    sleep 2
 }
 
 # 卸载 Gost
@@ -869,6 +934,7 @@ show_backup_menu() {
     echo -e "${CYAN}==================================================${NC}"
     echo "1. 备份配置"
     echo "2. 恢复备份"
+    echo "3. 删除备份"
     echo "00. 返回主菜单"
     echo -e "${CYAN}==================================================${NC}"
     echo -n "请选择操作: "
@@ -882,6 +948,7 @@ backup_management() {
         case $backup_choice in
             1) backup_config ;;
             2) import_config ;;
+            3) delete_backup ;;
             00) break ;;
             *) echo -e "${RED}无效选择!${NC}"; sleep 1 ;;
         esac
