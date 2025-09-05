@@ -2,8 +2,8 @@
 
 # ==================================================
 # 面板信息# 
-PANEL_VERSION="1.3"
-UPDATE_LOG="v1.3: 新增转发规则修改功能."
+PANEL_VERSION="1.4"
+UPDATE_LOG="v1.4: 增加备份恢复菜单, 修复无配置时备份的BUG."
 # ==================================================
 
 CONFIG_FILE="/etc/gost/config.yaml"
@@ -309,6 +309,14 @@ EOF
 
 # 备份配置
 backup_config() {
+    # 检查 Gost 是否已安装且配置文件存在
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        echo -e "${RED}错误: 配置文件不存在，无法备份!${NC}"
+        echo -e "${YELLOW}请先安装Gost或添加至少一条转发规则。${NC}"
+        sleep 2
+        return
+    fi
+
     local timestamp=$(date +%Y%m%d_%H%M%S)
     local hostname=$(hostname -s 2>/dev/null || echo "unknown")
     local backup_base_name="${hostname}_backup_${timestamp}"
@@ -316,11 +324,11 @@ backup_config() {
 
     mkdir -p "$CONFIG_BACKUP_DIR"
     
-    # 备份所有必要的配置文件
-    cp "$CONFIG_FILE" "$backup_file_yaml"
-    cp "$RAW_CONF_PATH" "$CONFIG_BACKUP_DIR/${backup_base_name}_rawconf"
-    cp "$REMARKS_PATH" "$CONFIG_BACKUP_DIR/${backup_base_name}_remarks.txt"
-    cp "$EXPIRES_PATH" "$CONFIG_BACKUP_DIR/${backup_base_name}_expires.txt"
+    # 备份所有存在的配置文件
+    [[ -f "$CONFIG_FILE" ]] && cp "$CONFIG_FILE" "$backup_file_yaml"
+    [[ -f "$RAW_CONF_PATH" ]] && cp "$RAW_CONF_PATH" "$CONFIG_BACKUP_DIR/${backup_base_name}_rawconf"
+    [[ -f "$REMARKS_PATH" ]] && cp "$REMARKS_PATH" "$CONFIG_BACKUP_DIR/${backup_base_name}_remarks.txt"
+    [[ -f "$EXPIRES_PATH" ]] && cp "$EXPIRES_PATH" "$CONFIG_BACKUP_DIR/${backup_base_name}_expires.txt"
 
     # 匹配 ereaml.sh 的输出样式
     echo -e "${PURPLE}==================================================${NC}"
@@ -808,6 +816,37 @@ config_menu() {
     done
 }
 
+# 显示备份与恢复菜单
+show_backup_menu() {
+    clear
+    local backup_count=$(ls -1 "$CONFIG_BACKUP_DIR"/*.yaml 2>/dev/null | wc -l)
+    
+    echo -e "${CYAN}==================================================${NC}"
+    echo -e "${CYAN}                 备份与恢复${NC}"
+    echo -e "${CYAN}                备份数量: $backup_count 个${NC}"
+    echo -e "${CYAN}==================================================${NC}"
+    echo "1. 备份配置"
+    echo "2. 恢复备份"
+    echo "00. 返回主菜单"
+    echo -e "${CYAN}==================================================${NC}"
+    echo -n "请选择操作: "
+}
+
+# 备份与恢复管理
+backup_management() {
+    while true; do
+        show_backup_menu
+        read backup_choice
+        case $backup_choice in
+            1) backup_config ;;
+            2) import_config ;;
+            00) break ;;
+            *) echo -e "${RED}无效选择!${NC}"; sleep 1 ;;
+        esac
+    done
+}
+
+
 # 显示主菜单
 show_menu() {
     clear
@@ -834,9 +873,8 @@ show_menu() {
     echo -e "2. 卸载 Gost"
     echo -e "3. 服务管理 (启动/停止/重启)"
     echo -e "4. 配置管理"
-    echo -e "5. 备份配置"
-    echo -e "6. 导入备份"
-    echo -e "7. 快捷方式管理"
+    echo -e "5. 备份与恢复"
+    echo -e "6. 快捷方式管理"
     echo -e "00. 退出"
     echo -e "${BLUE}================================${NC}"
     echo -e "${YELLOW}提示: 使用命令 'zf' 可快速打开此面板${NC}"
@@ -850,7 +888,7 @@ main() {
 
     while true; do
         show_menu
-        read -p "请选择操作 [1-7, 00]: " choice
+        read -p "请选择操作 [1-6, 00]: " choice
         case $choice in
             1)
                 install_dependencies
@@ -866,12 +904,9 @@ main() {
                 config_menu
                 ;;
             5)
-                backup_config
+                backup_management
                 ;;
             6)
-                import_config
-                ;;
-            7)
                 shortcut_menu
                 ;;
             00)
