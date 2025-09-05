@@ -310,46 +310,71 @@ EOF
 # 备份配置
 backup_config() {
     local timestamp=$(date +%Y%m%d_%H%M%S)
-    local hostname=$(hostname)
-    local backup_name="${hostname}_backup_${timestamp}"
+    local hostname=$(hostname -s 2>/dev/null || echo "unknown")
+    local backup_base_name="${hostname}_backup_${timestamp}"
+    local backup_file_yaml="$CONFIG_BACKUP_DIR/${backup_base_name}.yaml"
+
+    mkdir -p "$CONFIG_BACKUP_DIR"
     
-    cp $CONFIG_FILE "$CONFIG_BACKUP_DIR/${backup_name}.yaml"
-    cp $RAW_CONF_PATH "$CONFIG_BACKUP_DIR/${backup_name}_rawconf"
-    cp $REMARKS_PATH "$CONFIG_BACKUP_DIR/${backup_name}_remarks.txt"
-    cp $EXPIRES_PATH "$CONFIG_BACKUP_DIR/${backup_name}_expires.txt"
-    echo -e "${GREEN}配置已备份到: $CONFIG_BACKUP_DIR/${backup_name}.yaml${NC}"
+    # 备份所有必要的配置文件
+    cp "$CONFIG_FILE" "$backup_file_yaml"
+    cp "$RAW_CONF_PATH" "$CONFIG_BACKUP_DIR/${backup_base_name}_rawconf"
+    cp "$REMARKS_PATH" "$CONFIG_BACKUP_DIR/${backup_base_name}_remarks.txt"
+    cp "$EXPIRES_PATH" "$CONFIG_BACKUP_DIR/${backup_base_name}_expires.txt"
+
+    # 匹配 ereaml.sh 的输出样式
+    echo -e "${PURPLE}==================================================${NC}"
+    echo -e "${PURPLE}                 备份完成!${NC}"
+    echo -e "${PURPLE}    备份文件路径: $backup_file_yaml${NC}"
+    echo -e "${PURPLE}    (注意: 相关配置文件已一并备份)${NC}"
+    echo -e "${PURPLE}==================================================${NC}"
+    echo -e "\n按任意键返回..."
+    read -n 1 -s
 }
 
 # 导入备份配置
 import_config() {
-    echo -e "${YELLOW}可用备份文件:${NC}"
-    local backups=($(ls -1 $CONFIG_BACKUP_DIR/*.yaml 2>/dev/null))
+    echo -e "${GREEN}可用的备份文件:${NC}"
+    mkdir -p "$CONFIG_BACKUP_DIR"
+    local backups=($(ls -1 "$CONFIG_BACKUP_DIR"/*.yaml 2>/dev/null))
     
-    if [[ ${#backups[@]} -eq 0 ]]; then
-        echo -e "${RED}没有找到备份文件，请先备份！${NC}"
-        sleep 2
-        return 1
+    if [ ${#backups[@]} -eq 0 ]; then
+        echo "暂无备份文件"
+        sleep 1
+        return
     fi
-
+    
     for i in "${!backups[@]}"; do
-        echo "$((i+1)). ${backups[$i]}"
+        echo "$i: ${backups[$i]}"
     done
-
-    read -p "请选择要恢复的备份文件编号: " choice
-    if [[ $choice -ge 1 && $choice -le ${#backups[@]} ]]; then
-        local selected_file="${backups[$((choice-1))]}"
-        local base_name=$(basename "$selected_file" .yaml)
-        
-        cp "$selected_file" $CONFIG_FILE
-        cp "$CONFIG_BACKUP_DIR/${base_name}_rawconf" $RAW_CONF_PATH 2>/dev/null
-        cp "$CONFIG_BACKUP_DIR/${base_name}_remarks.txt" $REMARKS_PATH 2>/dev/null
-        cp "$CONFIG_BACKUP_DIR/${base_name}_expires.txt" $EXPIRES_PATH 2>/dev/null
-        
-        systemctl restart gost
-        echo -e "${GREEN}配置已从备份恢复${NC}"
-    else
-        echo -e "${RED}无效的选择${NC}"
+    
+    echo
+    read -p "请选择要恢复的备份编号: " backup_id
+    
+    if ! [[ $backup_id =~ ^[0-9]+$ ]] || [ $backup_id -ge ${#backups[@]} ]; then
+        echo -e "${RED}无效的备份编号!${NC}"
+        sleep 1
+        return
     fi
+    
+    local selected_file="${backups[$backup_id]}"
+    local base_name=$(basename "$selected_file" .yaml)
+    
+    # 恢复所有关联文件
+    cp "$selected_file" "$CONFIG_FILE"
+    cp "$CONFIG_BACKUP_DIR/${base_name}_rawconf" "$RAW_CONF_PATH" 2>/dev/null || touch "$RAW_CONF_PATH"
+    cp "$CONFIG_BACKUP_DIR/${base_name}_remarks.txt" "$REMARKS_PATH" 2>/dev/null || touch "$REMARKS_PATH"
+    cp "$CONFIG_BACKUP_DIR/${base_name}_expires.txt" "$EXPIRES_PATH" 2>/dev/null || touch "$EXPIRES_PATH"
+    
+    echo -e "${GREEN}配置已从 ${backups[$backup_id]} 恢复${NC}"
+    
+    # 询问是否重启服务
+    read -p "是否立即重启服务使配置生效? (y/n): " restart
+    if [[ $restart == "y" || $restart == "Y" ]]; then
+        systemctl restart gost
+        echo -e "${GREEN}服务已重启!${NC}"
+    fi
+    sleep 1
 }
 
 # 卸载 Gost
