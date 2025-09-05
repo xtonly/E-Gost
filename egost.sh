@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==================================================
-# 面板信息# 
+# 面板信息#
 PANEL_VERSION="1.4"
 UPDATE_LOG="v1.4: 增加备份恢复菜单, 修复无配置时备份的BUG."
 # ==================================================
@@ -51,7 +51,7 @@ get_rules_stats() {
     local active_count=0
     local expired_count=0
     local current_time=$(date +%s)
-    
+
     if [[ -f "$EXPIRES_PATH" ]]; then
         while IFS=: read -r port expire_date; do
             if [ "$expire_date" = "永久" ] || [ "$expire_date" -gt "$current_time" ]; then
@@ -61,7 +61,7 @@ get_rules_stats() {
             fi
         done < "$EXPIRES_PATH"
     fi
-    
+
     echo "$active_count $expired_count"
 }
 
@@ -97,7 +97,7 @@ install_dependencies() {
 # 下载并安装 Gost
 install_gost() {
     echo -e "${YELLOW}开始安装 Gost...${NC}"
-    
+
     # 创建配置目录
     mkdir -p /etc/gost
     mkdir -p $CONFIG_BACKUP_DIR
@@ -159,18 +159,18 @@ EOF
 # 创建快捷方式
 create_shortcut() {
     echo -e "${YELLOW}创建快捷命令...${NC}"
-    
+
     # 获取当前脚本的绝对路径
     local script_path=$(readlink -f "$0")
     local script_name=$(basename "$script_path")
-    
+
     # 复制脚本到系统路径
     cp "$script_path" /usr/local/bin/gost-manager.sh
     chmod +x /usr/local/bin/gost-manager.sh
-    
+
     # 创建软链接
     ln -sf /usr/local/bin/gost-manager.sh /usr/bin/zf
-    
+
     echo -e "${GREEN}快捷命令 'zf' 创建成功!${NC}"
     echo -e "${YELLOW}现在可以使用 'zf' 命令快速打开管理面板${NC}"
 }
@@ -178,40 +178,40 @@ create_shortcut() {
 # 删除快捷方式
 delete_shortcut() {
     echo -e "${YELLOW}当前已存在的快捷方式:${NC}"
-    
+
     local shortcuts=()
     local shortcut_paths=()
-    
+
     # 查找所有快捷方式
     if [[ -L "/usr/bin/zf" ]]; then
         shortcuts+=("zf")
         shortcut_paths+=("/usr/bin/zf")
     fi
-    
+
     if [[ -L "/usr/bin/g" ]]; then
         shortcuts+=("g")
         shortcut_paths+=("/usr/bin/g")
     fi
-    
+
     if [[ ${#shortcuts[@]} -eq 0 ]]; then
         echo -e "${RED}没有找到任何快捷方式${NC}"
         sleep 2
         return
     fi
-    
+
     # 显示快捷方式列表
     for i in "${!shortcuts[@]}"; do
         echo "$((i+1)). ${shortcuts[$i]} -> $(readlink -f ${shortcut_paths[$i]})"
     done
     echo "99. 删除所有快捷方式"
     echo "00. 返回"
-    
+
     read -p "请选择要删除的快捷方式编号 (多个用空格分隔): " choices
-    
+
     if [[ "$choices" == "00" ]]; then
         return
     fi
-    
+
     if [[ "$choices" == "99" ]]; then
         for path in "${shortcut_paths[@]}"; do
             rm -f "$path"
@@ -221,7 +221,7 @@ delete_shortcut() {
         sleep 2
         return
     fi
-    
+
     # 处理多个选择
     local deleted=0
     for choice in $choices; do
@@ -234,7 +234,7 @@ delete_shortcut() {
             echo -e "${RED}无效的选择: $choice${NC}"
         fi
     done
-    
+
     if [[ $deleted -gt 0 ]]; then
         echo -e "${GREEN}已删除 $deleted 个快捷方式${NC}"
     else
@@ -251,7 +251,7 @@ shortcut_menu() {
         echo -e "2. 删除快捷方式"
         echo -e "00. 返回主菜单"
         echo -e "${CYAN}===================${NC}"
-        
+
         read -p "请选择操作 [1-2, 00]: " choice
         case $choice in
             1)
@@ -278,7 +278,7 @@ create_default_config() {
 
 services: []
 EOF
-    
+
     # 初始化其他配置文件
     touch $RAW_CONF_PATH $REMARKS_PATH $EXPIRES_PATH
 }
@@ -317,13 +317,21 @@ backup_config() {
         return
     fi
 
+    # 备份前确认
+    read -p "确定要创建新的备份吗? (y/n): " confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        echo -e "${YELLOW}已取消备份操作。${NC}"
+        sleep 1
+        return
+    fi
+
     local timestamp=$(date +%Y%m%d_%H%M%S)
     local hostname=$(hostname -s 2>/dev/null || echo "unknown")
     local backup_base_name="${hostname}_backup_${timestamp}"
     local backup_file_yaml="$CONFIG_BACKUP_DIR/${backup_base_name}.yaml"
 
     mkdir -p "$CONFIG_BACKUP_DIR"
-    
+
     # 备份所有存在的配置文件
     [[ -f "$CONFIG_FILE" ]] && cp "$CONFIG_FILE" "$backup_file_yaml"
     [[ -f "$RAW_CONF_PATH" ]] && cp "$RAW_CONF_PATH" "$CONFIG_BACKUP_DIR/${backup_base_name}_rawconf"
@@ -345,37 +353,49 @@ import_config() {
     echo -e "${GREEN}可用的备份文件:${NC}"
     mkdir -p "$CONFIG_BACKUP_DIR"
     local backups=($(ls -1 "$CONFIG_BACKUP_DIR"/*.yaml 2>/dev/null))
-    
+
     if [ ${#backups[@]} -eq 0 ]; then
         echo "暂无备份文件"
         sleep 1
         return
     fi
-    
+
+    # 列表从1开始编号
     for i in "${!backups[@]}"; do
-        echo "$i: ${backups[$i]}"
+        echo "$((i+1)): ${backups[$i]}"
     done
-    
+
     echo
-    read -p "请选择要恢复的备份编号: " backup_id
-    
-    if ! [[ $backup_id =~ ^[0-9]+$ ]] || [ $backup_id -ge ${#backups[@]} ]; then
+    read -p "请选择要恢复的备份编号 (输入 0 返回): " backup_id
+
+    # 检查是否取消
+    if [[ "$backup_id" == "0" ]]; then
+        echo -e "${YELLOW}已取消恢复操作。${NC}"
+        sleep 1
+        return
+    fi
+
+    # 验证输入是否为有效的正整数, 且在列表范围内
+    if ! [[ $backup_id =~ ^[1-9][0-9]*$ ]] || [ $backup_id -gt ${#backups[@]} ]; then
         echo -e "${RED}无效的备份编号!${NC}"
         sleep 1
         return
     fi
-    
-    local selected_file="${backups[$backup_id]}"
+
+    # 将1开始的编号转换为0开始的数组索引
+    local index=$((backup_id - 1))
+
+    local selected_file="${backups[$index]}"
     local base_name=$(basename "$selected_file" .yaml)
-    
+
     # 恢复所有关联文件
     cp "$selected_file" "$CONFIG_FILE"
     cp "$CONFIG_BACKUP_DIR/${base_name}_rawconf" "$RAW_CONF_PATH" 2>/dev/null || touch "$RAW_CONF_PATH"
     cp "$CONFIG_BACKUP_DIR/${base_name}_remarks.txt" "$REMARKS_PATH" 2>/dev/null || touch "$REMARKS_PATH"
     cp "$CONFIG_BACKUP_DIR/${base_name}_expires.txt" "$EXPIRES_PATH" 2>/dev/null || touch "$EXPIRES_PATH"
-    
-    echo -e "${GREEN}配置已从 ${backups[$backup_id]} 恢复${NC}"
-    
+
+    echo -e "${GREEN}配置已从 ${backups[$index]} 恢复${NC}"
+
     # 询问是否重启服务
     read -p "是否立即重启服务使配置生效? (y/n): " restart
     if [[ $restart == "y" || $restart == "Y" ]]; then
@@ -388,7 +408,7 @@ import_config() {
 # 卸载 Gost
 uninstall_gost() {
     echo -e "${RED}正在卸载 Gost...${NC}"
-    
+
     # 卸载前确认
     read -p "确定要卸载 Gost 吗? 此操作将删除程序和配置文件, 但会保留备份。(y/n): " confirm
     if [[ $confirm != "y" && $confirm != "Y" ]]; then
@@ -396,7 +416,7 @@ uninstall_gost() {
         sleep 1
         return
     fi
-    
+
     # 停止并禁用服务
     systemctl stop gost >/dev/null 2>&1
     systemctl disable gost >/dev/null 2>&1
@@ -415,17 +435,17 @@ uninstall_gost() {
     rm -f "$RAW_CONF_PATH"
     rm -f "$REMARKS_PATH"
     rm -f "$EXPIRES_PATH"
-    
+
     # 重载系统服务守护进程
     systemctl daemon-reload
 
     echo -e "${GREEN}Gost 已成功卸载!${NC}"
-    
+
     # 提示备份文件位置
     if [ -d "$CONFIG_BACKUP_DIR" ]; then
         echo -e "${YELLOW}配置文件已删除, 备份文件已保留在: ${CONFIG_BACKUP_DIR}${NC}"
     fi
-    
+
     # 等待用户按键返回
     echo -e "\n按任意键返回主菜单..."
     read -n 1 -s
@@ -443,7 +463,7 @@ service_management() {
         echo -e "6. 禁用开机自启"
         echo -e "00. 返回主菜单"
         echo -e "${CYAN}================${NC}"
-        
+
         read -p "请选择操作 [1-6, 00]: " choice
         case $choice in
             1)
@@ -488,12 +508,12 @@ rebuild_config() {
         # 使用正确的YAML格式
         echo '# Gost 端口转发配置' > $CONFIG_FILE
         echo 'services:' >> $CONFIG_FILE
-        
+
         while IFS= read -r line; do
             local_port=$(echo "$line" | cut -d':' -f2 | cut -d'#' -f1)
             target=$(echo "$line" | cut -d'#' -f2)
             target_port=$(echo "$line" | cut -d'#' -f3)
-            
+
             # 添加TCP转发
             echo "  - name: forward-${local_port}-tcp" >> $CONFIG_FILE
             echo "    addr: :${local_port}" >> $CONFIG_FILE
@@ -506,7 +526,7 @@ rebuild_config() {
             echo "        - name: target-tcp" >> $CONFIG_FILE
             echo "          addr: ${target}:${target_port}" >> $CONFIG_FILE
             echo "" >> $CONFIG_FILE
-            
+
             # 添加UDP转发
             echo "  - name: forward-${local_port}-udp" >> $CONFIG_FILE
             echo "    addr: :${local_port}" >> $CONFIG_FILE
@@ -519,7 +539,7 @@ rebuild_config() {
             echo "        - name: target-udp" >> $CONFIG_FILE
             echo "          addr: ${target}:${target_port}" >> $CONFIG_FILE
             echo "" >> $CONFIG_FILE
-            
+
         done < "$RAW_CONF_PATH"
     fi
 }
@@ -527,7 +547,7 @@ rebuild_config() {
 # 添加 TCP+UDP 双协议转发
 add_dual_forward() {
     echo -e "${YELLOW}添加 TCP+UDP 双协议转发规则...${NC}"
-    
+
     while true; do
         read -p "请输入本地监听端口 (输入 0 返回): " local_port
 
@@ -546,7 +566,7 @@ add_dual_forward() {
             echo -e "${RED}错误: 端口 ${local_port} 正在被其他程序占用，请重新输入!${NC}"
             continue
         fi
-        
+
         # 检查是否已被Gost规则使用
         if grep -q ":${local_port}#" "$RAW_CONF_PATH" 2>/dev/null; then
             echo -e "${RED}错误: 端口 ${local_port} 已被其他Gost规则使用，请重新输入!${NC}"
@@ -566,14 +586,14 @@ add_dual_forward() {
         sleep 2
         return
     fi
-    
+
     if [[ -z "$name" ]]; then
         name="未命名规则"
     fi
 
     # 添加到原始配置
     echo "forward:${local_port}#${target}#${target_port}" >> "$RAW_CONF_PATH"
-    
+
     # 添加规则备注
     echo "${local_port}:${name}" >> "$REMARKS_PATH"
 
@@ -582,10 +602,10 @@ add_dual_forward() {
 
     # 重建配置文件
     rebuild_config
-    
+
     # 重启服务
     systemctl restart gost
-    
+
     echo -e "${GREEN}添加成功! TCP+UDP 双协议转发已生效。${NC}"
     echo -e "${YELLOW}  本地端口: ${local_port}${NC}"
     echo -e "${YELLOW}  目标地址: ${target}:${target_port}${NC}"
@@ -603,7 +623,7 @@ show_config() {
             target=$(echo "$line" | cut -d'#' -f2)
             target_port=$(echo "$line" | cut -d'#' -f3)
             name=$(grep "^${local_port}:" "$REMARKS_PATH" 2>/dev/null | cut -d':' -f2- || echo "未命名")
-            
+
             echo -e "${GREEN}$id. 端口 ${local_port} -> ${target}:${target_port} (${name})${NC}"
             ((id++))
         done < "$RAW_CONF_PATH"
@@ -616,11 +636,11 @@ show_config() {
 # 修改转发规则 (新功能)
 modify_rule() {
     echo -e "${YELLOW}修改转发规则...${NC}"
-    
+
     if [[ ! -f "$RAW_CONF_PATH" ]] || [[ ! -s "$RAW_CONF_PATH" ]]; then
         echo -e "${RED}暂无转发规则可修改${NC}"; sleep 2; return
     fi
-    
+
     show_config
     read -p "请输入要修改的规则ID (输入 0 返回): " rule_id
 
@@ -638,7 +658,7 @@ modify_rule() {
     local current_target_port=$(echo "$line_to_edit" | cut -d'#' -f3)
     local current_remark=$(grep "^${current_local_port}:" "$REMARKS_PATH" 2>/dev/null | cut -d':' -f2- || echo "未命名")
     local current_expire=$(grep "^${current_local_port}:" "$EXPIRES_PATH" 2>/dev/null | cut -d':' -f2- || echo "永久")
-    
+
     echo -e "${CYAN}--------------------------------------------------${NC}"
     echo "正在修改规则 #${rule_id}. (直接回车保留原值)"
 
@@ -650,7 +670,7 @@ modify_rule() {
         if [[ ! $new_local_port =~ ^[0-9]+$ ]] || [[ "$new_local_port" -lt 1 ]] || [[ "$new_local_port" -gt 65535 ]]; then
             echo -e "${RED}错误: 端口无效! 必须是1-65535之间的数字。${NC}"; continue
         fi
-        
+
         # 仅当端口号改变时，才检查占用情况
         if [[ "$new_local_port" != "$current_local_port" ]]; then
             if ss -tuln | grep -q ":${new_local_port} "; then
@@ -662,37 +682,37 @@ modify_rule() {
         fi
         break
     done
-    
+
     # 获取新目标地址
     read -p "新目标地址 [当前: $current_target]: " new_target
     new_target=${new_target:-$current_target}
-    
+
     # 获取新目标端口
     read -p "新目标端口 [当前: $current_target_port]: " new_target_port
     new_target_port=${new_target_port:-$current_target_port}
     if [[ ! $new_target_port =~ ^[0-9]+$ ]] || [[ "$new_target_port" -lt 1 ]] || [[ "$new_target_port" -gt 65535 ]]; then
         echo -e "${RED}修改失败: 目标端口无效!${NC}"; sleep 2; return
     fi
-    
+
     # 获取新备注
     read -p "新规则备注 [当前: $current_remark]: " new_remark
     new_remark=${new_remark:-$current_remark}
-    
+
     # --- 应用修改 ---
     # 1. 删除旧的规则数据
     sed -i "${rule_id}d" "$RAW_CONF_PATH"
     sed -i "/^${current_local_port}:/d" "$REMARKS_PATH"
     sed -i "/^${current_local_port}:/d" "$EXPIRES_PATH"
-    
+
     # 2. 添加新的规则数据
     echo "forward:${new_local_port}#${new_target}#${new_target_port}" >> "$RAW_CONF_PATH"
     echo "${new_local_port}:${new_remark}" >> "$REMARKS_PATH"
     echo "${new_local_port}:${current_expire}" >> "$EXPIRES_PATH" # 保留原有的有效期
-    
+
     # 3. 重建配置并重启
     rebuild_config
     systemctl restart gost
-    
+
     echo -e "${GREEN}规则 #${rule_id} 修改成功!${NC}"
     sleep 2
 }
@@ -704,11 +724,11 @@ delete_rule() {
         sleep 2
         return
     fi
-    
+
     show_config
     echo -e "${YELLOW}请输入要删除的规则ID（多个ID用空格分隔，如：1 2 3 或 1 3）:${NC}"
     read -p "规则ID: " rule_ids
-    
+
     if [ -z "$rule_ids" ]; then
         echo -e "${RED}未输入任何规则ID${NC}"
         sleep 2
@@ -732,12 +752,12 @@ delete_rule() {
         fi
 
         local port=$(echo "$line" | cut -d':' -f2 | cut -d'#' -f1)
-        
+
         # 删除规则
         sed -i "${rule_id}d" "$RAW_CONF_PATH"
         sed -i "/^${port}:/d" "$REMARKS_PATH" 2>/dev/null
         sed -i "/^${port}:/d" "$EXPIRES_PATH" 2>/dev/null
-        
+
         deleted_ports="$deleted_ports $port"
     done
 
@@ -758,23 +778,23 @@ delete_all_rules() {
         sleep 2
         return
     fi
-    
+
     read -p "确定要删除所有转发规则吗？(y/n): " confirm
     if [[ $confirm != "y" && $confirm != "Y" ]]; then
         echo -e "${YELLOW}已取消操作${NC}"
         sleep 2
         return
     fi
-    
+
     # 清空所有配置文件
     > "$RAW_CONF_PATH"
     > "$REMARKS_PATH"
     > "$EXPIRES_PATH"
-    
+
     # 重建配置
     rebuild_config
     systemctl restart gost
-    
+
     echo -e "${GREEN}已删除所有转发规则${NC}"
     sleep 2
 }
@@ -818,7 +838,7 @@ config_menu() {
         echo -e "7. 检查端口占用"
         echo -e "00. 返回主菜单"
         echo -e "${CYAN}================${NC}"
-        
+
         read -p "请选择操作 [1-7, 00]: " choice
         case $choice in
             1) add_dual_forward ;;
@@ -842,7 +862,7 @@ config_menu() {
 show_backup_menu() {
     clear
     local backup_count=$(ls -1 "$CONFIG_BACKUP_DIR"/*.yaml 2>/dev/null | wc -l)
-    
+
     echo -e "${CYAN}==================================================${NC}"
     echo -e "${CYAN}                 备份与恢复${NC}"
     echo -e "${CYAN}                备份数量: $backup_count 个${NC}"
@@ -873,14 +893,14 @@ backup_management() {
 show_menu() {
     clear
     show_time
-    
+
     # 获取系统信息
     local gost_version=$(get_gost_version)
     local gost_status=$(get_gost_status)
     local stats=$(get_rules_stats)
     local active_count=$(echo $stats | awk '{print $1}')
     local expired_count=$(echo $stats | awk '{print $2}')
-    
+
     echo -e "${BLUE}================================${NC}"
     echo -e "${BLUE}           E-Gost 转发面板          ${NC}"
     echo -e "${BLUE}================================${NC}"
